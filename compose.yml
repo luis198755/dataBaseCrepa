@@ -27,5 +27,16 @@ services:
       - mariadb
     restart: unless-stopped
 
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: creperia_api
+    ports:
+      - "8081:8080"
+    depends_on:
+      - mariadb
+    restart: unless-stopped
+
 volumes:
   mariadb_data:
