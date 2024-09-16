@@ -2,57 +2,97 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	_ "github.com/go-sql-driver/mysql"
 )
 
 type Producto struct {
-	ID          int            `json:"id"`
-	Nombre      string         `json:"nombre"`
-	Descripcion sql.NullString `json:"descripcion"`
-	Precio      float64        `json:"precio"`
-	CategoriaID int            `json:"categoria_id"`
+	ID          int     `json:"id"`
+	Nombre      string  `json:"nombre"`
+	Descripcion string  `json:"descripcion,omitempty"`
+	Precio      float64 `json:"precio"`
+	CategoriaID int     `json:"categoria_id"`
+}
+
+func (p *Producto) UnmarshalJSON(data []byte) error {
+	type Alias Producto
+	aux := &struct {
+		Descripcion *string `json:"descripcion"`
+		*Alias
+	}{
+		Alias: (*Alias)(p),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if aux.Descripcion != nil {
+		p.Descripcion = *aux.Descripcion
+	}
+	return nil
+}
+
+func (p Producto) MarshalJSON() ([]byte, error) {
+	type Alias Producto
+	return json.Marshal(&struct {
+		Descripcion string `json:"descripcion,omitempty"`
+		Alias
+	}{
+		Descripcion: p.Descripcion,
+		Alias:       (Alias)(p),
+	})
 }
 
 var db *sql.DB
 
 func main() {
-	// Inicializar la conexión a la base de datos
+	// Initialize database connection
 	initDB()
 
-	// Configurar el router de Gin
-	gin.SetMode(gin.ReleaseMode)  // Opcional: Establece el modo de producción
+	// Configure Gin router
+	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 
-	// Configurar múltiples proxies confiables
+	// Configure CORS
+	r.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"http://localhost"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE"},
+		AllowHeaders:     []string{"Origin", "Content-Type"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
+
+	// Configure trusted proxies
 	trustedProxies := []string{
-		"127.0.0.1",        // localhost
-		"10.0.0.0/8",       // Red privada clase A
-		"172.16.0.0/12",    // Red privada clase B
-		"192.168.0.0/16",   // Red privada clase C
-		// Agrega aquí las direcciones IP o rangos CIDR de tus proxies adicionales
+		"127.0.0.1",
+		"10.0.0.0/8",
+		"172.16.0.0/12",
+		"192.168.0.0/16",
 	}
 
 	err := r.SetTrustedProxies(trustedProxies)
 	if err != nil {
-		log.Fatal("Error al configurar proxies confiables: ", err)
+		log.Fatal("Error configuring trusted proxies: ", err)
 	}
 
-	// Rutas para los productos
+	// Define routes
 	r.GET("/productos", getProductos)
 	r.GET("/productos/:id", getProducto)
 	r.POST("/productos", createProducto)
 	r.PUT("/productos/:id", updateProducto)
 	r.DELETE("/productos/:id", deleteProducto)
 
-	// Iniciar el servidor
-	log.Println("Servidor iniciando en http://localhost:8080")
+	// Start the server
+	log.Println("Server starting on http://localhost:8080")
 	if err := r.Run(":8080"); err != nil {
-		log.Fatal("Error al iniciar el servidor: ", err)
+		log.Fatal("Error starting server: ", err)
 	}
 }
 
@@ -79,10 +119,12 @@ func getProductos(c *gin.Context) {
 	var productos []Producto
 	for rows.Next() {
 		var p Producto
-		if err := rows.Scan(&p.ID, &p.Nombre, &p.Descripcion, &p.Precio, &p.CategoriaID); err != nil {
+		var descripcion sql.NullString
+		if err := rows.Scan(&p.ID, &p.Nombre, &descripcion, &p.Precio, &p.CategoriaID); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		p.Descripcion = descripcion.String
 		productos = append(productos, p)
 	}
 
@@ -92,21 +134,23 @@ func getProductos(c *gin.Context) {
 func getProducto(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "ID inválido"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID"})
 		return
 	}
 
 	var p Producto
+	var descripcion sql.NullString
 	err = db.QueryRow("SELECT id, nombre, descripcion, precio, categoria_id FROM productos WHERE id = ?", id).
-		Scan(&p.ID, &p.Nombre, &p.Descripcion, &p.Precio, &p.CategoriaID)
+		Scan(&p.ID, &p.Nombre, &descripcion, &p.Precio, &p.CategoriaID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Producto no encontrado"})
+			c.JSON(http.StatusNotFound, gin.H{"error": "Product not found"})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	p.Descripcion = descripcion.String
 	c.JSON(http.StatusOK, p)
 }
 
@@ -118,7 +162,7 @@ func createProducto(c *gin.Context) {
 	}
 
 	result, err := db.Exec("INSERT INTO productos (nombre, descripcion, precio, categoria_id) VALUES (?, ?, ?, ?)",
-		p.Nombre, p.Descripcion, p.Precio, p.CategoriaID)
+		p.Nombre, sql.NullString{String: p.Descripcion, Valid: p.Descripcion != ""}, p.Precio, p.CategoriaID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -132,7 +176,7 @@ func createProducto(c *gin.Context) {
 func updateProducto(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "ID inválido"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID"})
 		return
 	}
 
@@ -143,7 +187,7 @@ func updateProducto(c *gin.Context) {
 	}
 
 	_, err = db.Exec("UPDATE productos SET nombre = ?, descripcion = ?, precio = ?, categoria_id = ? WHERE id = ?",
-		p.Nombre, p.Descripcion, p.Precio, p.CategoriaID, id)
+		p.Nombre, sql.NullString{String: p.Descripcion, Valid: p.Descripcion != ""}, p.Precio, p.CategoriaID, id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -156,7 +200,7 @@ func updateProducto(c *gin.Context) {
 func deleteProducto(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "ID inválido"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID"})
 		return
 	}
 
@@ -168,9 +212,9 @@ func deleteProducto(c *gin.Context) {
 
 	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Producto no encontrado"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "Product not found"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Producto eliminado"})
+	c.JSON(http.StatusOK, gin.H{"message": "Product deleted"})
 }

@@ -38,5 +38,16 @@ services:
       - mariadb
     restart: unless-stopped
 
+  webapp:
+    build:
+      context: .
+      dockerfile: Dockerfile.webapp
+    container_name: creperia_webapp
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
 volumes:
   mariadb_data:

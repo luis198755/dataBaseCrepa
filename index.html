@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Product Management</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: #f4f4f4;
+        }
+        h1 {
+            color: #333;
+        }
+        #product-form, #product-list {
+            background: white;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        form {
+            display: flex;
+            flex-direction: column;
+        }
+        input, button {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            text-align: left;
+            padding: 8px;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #4CAF50;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <h1>Product Management</h1>
+    
+    <div id="product-form">
+        <h2>Add/Edit Product</h2>
+        <form id="form">
+            <input type="hidden" id="id">
+            <input type="text" id="nombre" placeholder="Product Name" required>
+            <input type="text" id="descripcion" placeholder="Description">
+            <input type="number" id="precio" placeholder="Price" step="0.01" required>
+            <input type="number" id="categoria_id" placeholder="Category ID" required>
+            <button type="submit">Save Product</button>
+        </form>
+    </div>
+
+    <div id="product-list">
+        <h2>Product List</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Description</th>
+                    <th>Price</th>
+                    <th>Category ID</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="products">
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:8081';
+        const form = document.getElementById('form');
+        const productsList = document.getElementById('products');
+
+        // Fetch all products
+        function getProducts() {
+            fetch(`${API_URL}/productos`)
+                .then(response => response.json())
+                .then(products => {
+                    productsList.innerHTML = '';
+                    products.forEach(product => {
+                        const row = `
+                            <tr>
+                                <td>${product.nombre}</td>
+                                <td>${product.descripcion || ''}</td>
+                                <td>${product.precio}</td>
+                                <td>${product.categoria_id}</td>
+                                <td>
+                                    <button onclick="editProduct(${product.id})">Edit</button>
+                                    <button onclick="deleteProduct(${product.id})">Delete</button>
+                                </td>
+                            </tr>
+                        `;
+                        productsList.innerHTML += row;
+                    });
+                })
+                .catch(error => console.error('Error:', error));
+        }
+
+        // Add or update a product
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const product = {
+                nombre: document.getElementById('nombre').value,
+                descripcion: document.getElementById('descripcion').value,
+                precio: parseFloat(document.getElementById('precio').value),
+                categoria_id: parseInt(document.getElementById('categoria_id').value)
+            };
+            const id = document.getElementById('id').value;
+            const url = id ? `${API_URL}/productos/${id}` : `${API_URL}/productos`;
+            const method = id ? 'PUT' : 'POST';
+
+            fetch(url, {
+                method: method,
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(product),
+            })
+            .then(response => response.json())
+            .then(() => {
+                form.reset();
+                document.getElementById('id').value = '';
+                getProducts();
+            })
+            .catch((error) => console.error('Error:', error));
+        });
+
+        // Edit a product
+        function editProduct(id) {
+            fetch(`${API_URL}/productos/${id}`)
+                .then(response => response.json())
+                .then(product => {
+                    document.getElementById('id').value = product.id;
+                    document.getElementById('nombre').value = product.nombre;
+                    document.getElementById('descripcion').value = product.descripcion || '';
+                    document.getElementById('precio').value = product.precio;
+                    document.getElementById('categoria_id').value = product.categoria_id;
+                })
+                .catch((error) => console.error('Error:', error));
+        }
+
+        // Delete a product
+        function deleteProduct(id) {
+            if (confirm('Are you sure you want to delete this product?')) {
+                fetch(`${API_URL}/productos/${id}`, {
+                    method: 'DELETE',
+                })
+                .then(() => getProducts())
+                .catch((error) => console.error('Error:', error));
+            }
+        }
+
+        // Initial load of products
+        getProducts();
+    </script>
+</body>
+</html>
